@@ -9,6 +9,7 @@ sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install -y --no-i
 
 git config --global user.email "jerryjo@microsoft.com"
 git config --global user.name "Jerry Joyce"
+git lfs install
 
 # Docker post-install
 echo fs.inotify.max_user_instances=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
@@ -21,13 +22,14 @@ sudo systemctl enable containerd.service
 
 # azure CLI
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+mkdir -p ~/.azure
 
 # Go
 go_version="1.18.3"
 wget -O- https://dl.google.com/go/go${go_version}.linux-amd64.tar.gz | sudo tar xvz -C /usr/local
 
 # Powerline
-# /usr/local/go/bin/go install github.com/justjanne/powerline-go@latest
+/usr/local/go/bin/go install github.com/justjanne/powerline-go@latest
 
 # Azure artifacts credential provider
 wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
@@ -35,7 +37,8 @@ wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
 # kubectl
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - && \
     echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee -a /etc/apt/sources.list.d/kubernetes.list && \
-    sudo apt-get update && sudo apt-get install -y --no-install-recommends kubectl
+    sudo apt-get update && sudo apt-get install -y --no-install-recommends kubectl && \
+    mkdir -p ~/.kube
 
 # helm
 curl https://baltocdn.com/helm/signing.asc | sudo apt-key add - && \

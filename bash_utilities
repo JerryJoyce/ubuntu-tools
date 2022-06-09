@@ -1,5 +1,5 @@
 
-export PATH=${PATH}:/usr/local/go/bin:~/go/bin
+export PATH=${PATH}:/usr/local/go/bin:~/go/bin:~/ubuntu-tools
 export KUBE_EDITOR='open -n -W -b com.microsoft.VSCodeInsiders --args'
 export LBC_USE_POWERLINE=true
 
@@ -139,5 +139,5 @@ function kube {
 }
 
 function uvs-svc-build {
-    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/uvs/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
+    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
 }
