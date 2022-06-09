@@ -1,0 +1,143 @@
+
+export PATH=${PATH}:/usr/local/go/bin:~/go/bin
+export KUBE_EDITOR='open -n -W -b com.microsoft.VSCodeInsiders --args'
+export LBC_USE_POWERLINE=true
+
+# powerline prompt
+function _update_ps1() {
+    PS1="$(powerline-go -colorize-hostname -modules 'kube,venv,host,ssh,cwd,perms,git,hg,exit,root' -error $? -jobs $(jobs -p | wc -l))"
+
+    # Uncomment the following line to automatically clear errors after showing
+    # them once. This not only clears the error for powerline-go, but also for
+    # everything else you run in that shell. Don't enable this if you're not
+    # sure this is what you want.
+
+    #set "?"
+}
+
+[[ "$TERM" != "linux" ]] && [[ -f "$(which powerline-go)" ]] && {
+    PROMPT_COMMAND="_update_ps1; $PROMPT_COMMAND"
+}
+
+# export helpers
+exports_file=~/.bash_exports.json
+
+[[ -f ${exports_file} ]] && {
+   while read -r l ; do
+      eval $l ;
+   done < <(cat ${exports_file} | jq -r "."'|keys_unsorted[] as $key|"export \($key)=\(.[$key])"')
+} || echo "{}" > ${exports_file}
+
+function update_exports {
+    new_exports=$(jq --arg key "$1" --arg value "$2" '. + {($key): $value}' ${exports_file})
+    echo "${new_exports}" > ${exports_file}
+    export $1=$2
+    echo "$1=$2"
+}
+
+function unset_export {
+    [[ $(jq --arg key "$1" 'has(($key))' ${exports_file}) == true ]] && {
+      new_exports=$(jq --arg key "$1" 'del(.[($key)])' ${exports_file})
+      echo "${new_exports}" > ${exports_file}
+      unset $1
+      echo "$1 unset"
+    } || {
+        echo "$1 is not set"
+    }
+}
+
+function get_api_key {
+    function _usage() {
+        cat <<HELP
+    Usage: get_api_key [OPTIONS]
+
+    Get an API key for computer vision and set in environment
+
+    Options:
+    -h/--help          Prints help and exits
+    -e/--environment   Environment for API key (dev|prod)
+    -f/--force         Force retrieval even if already set
+
+HELP
+  }
+
+  PARAMS=""
+  while (( "$#" )); do
+  case "$1" in
+  -h|--help)
+    _usage
+    return 0
+    ;;
+  -e|--environment)
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+      environment=$2
+      shift 2
+    else
+      echo "Error: Argument for $1 is missing" >&2
+      _usage
+      return 1
+    fi
+    ;;
+  -f|--force)
+    force_update=TRUE
+    shift
+    ;;
+  -*|--*=)
+    echo "Error: Unsupported flag $1" >&2
+    _usage
+    return 0
+    ;;
+  *) # preserve positional arguments
+  PARAMS="$PARAMS $1"
+  shift
+  ;;
+  esac
+  done
+
+  # set positional arguments in their proper place
+  eval set -- "$PARAMS"
+
+  environment=${environment:-dev}
+
+  [[ ${environment} == "dev" || ${environment} == "prod" ]] || {
+    echo "Invalid enviroment.  Must be dev|prod"
+    return 1
+  }
+
+  [[ ${environment} == "dev" ]] && {
+    key_name=rtv-cs-apikey
+    environment_name=API_KEY
+  } || {
+    key_name=rtv-cs-apikey-prod
+    environment_name=API_KEY_PROD
+  }
+
+  [[ -z "${!environment_name}" || ${force_update} ]] && {
+    api_key=$(get_azure_secret -s 6f05198f-0aa6-4d43-8831-799e56b52e60 -v rtvs-skyman-dev-usw2 -n ${key_name})
+    [[ -z ${api_key} ]] || update_exports ${environment_name} ${api_key}
+  } || echo "${environment_name}=${!environment_name}"
+}
+
+# kubectl helpers
+function kube_config {
+    [[ -f $1 ]] && {
+        update_exports KUBECONFIG $1
+    } || {
+        echo "$1 is not a valid KUBECONFIG"
+    }
+}
+
+function kube_ns {
+    namespace=${1:-default}
+    update_exports KUBE_NAMESPACE $namespace
+}
+
+function kube {
+    namespace=${KUBE_NAMESPACE:-default}
+
+    kubectl -n ${namespace} "$@"
+}
+
+function uvs-svc-build {
+    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/uvs/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
+}

@@ -1,0 +1,404 @@
+function _usage()
+{
+cat <<HELP
+Usage: launch-build-container.sh [OPTIONS]
+
+Use this script to launch the containerized build environment.
+This script maps in various volumes from the host machine to enable the container to run in the context of
+the user that launches it.  Additionally it maps in configuration files for command line tools such as the
+Azure CLI and kubectl.
+
+The script reads configuration from the environment.  Some of that configuration can be overridden via command
+line arguments.
+
+Options:
+  -h/--help          Prints help and exits
+  -i/--image         Image name
+  -t/--tag           Image tag
+  -f/--force-pull    Pull the image prior to starting the container
+  -n/--name          Container name
+  -c/--console-name  Set the name of the console title
+  -r/--repo          Path to local cloned repository.  This will be mounted as a volume
+  -b/--base-path     Base path location to mount the repo
+  -v/--volume        A volume to be mounted in the container. Repeatable.
+  -p/--port          A port to be mapped in the container. Repeatable.
+  -e/--env           An environment variable of the form NAME=VALUE. Repeatable.
+
+
+Environment:
+
+  LBC_IMAGE_TAG       : The image tag. Defaults to 'latest'
+
+  LBC_BUILD_IMAGE     : The image name.  Defaults to cdpxlinux.azurecr.io/user/cogsvcs/vision-build-aspnet-3.1
+
+  LBC_PULL_IMAGE      : If set, pulls the image prior to starting the container.  Defauls to unset.
+
+  LBC_CONTAINER_NAME  : The build container name.  Defaults to the name of the folder where the repo is cloned
+
+  LBC_CODE_REPO       : Path of source code to mount.  Defaults to the repo from which the script is run.
+
+  LBC_HOST_NAME       : Host name for the container.  Defaults to lbc-${hostname}
+
+  LBC_MOUNTS_RO       : Space separated list of volume mount specifications to be mounted readonly.  They can specify both 'from:to' or just 'from', which will be used as 'to'
+
+  LBC_MOUNTS_RW       : Space separated list of volume mount specifications to be mounted read/write.  They can specify both 'from:to' or just 'from', which will be used as 'to'
+
+  LBC_PORT_MAPPINGS   : Space separated list of port mappings.  They can specify both host:container or be a single value which will be used for both.
+
+  LBC_HOST_ENV        : Space separated list of environment variable names from the host to be forwarded into the container
+
+  LBC_ENV             : Space separated list of NAME=VALUE pairs to set in the environment
+
+  LBC_AZURE_CONFIG    : Location of Azure config.  Mapped in as a volume
+
+  LBC_USE_POWERLINE   : Enable powerline prompt in container.  Requires a powerline font to be installed and configured in the terminal
+                        https://github.com/microsoft/cascadia-code
+
+HELP
+    return 0
+}
+
+
+PARAMS=""
+while (( "$#" )); do
+case "$1" in
+    -h|--help)
+    _usage
+    exit 0
+    ;;
+    -i|--image) # image name
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_BUILD_IMAGE=$2
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -t|--tag) # image tag
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_IMAGE_TAG=$2
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -f|--force-pull)
+    LBC_PULL_IMAGE=1
+    shift
+    ;;
+    -n|--name) # container name
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_CONTAINER_NAME=$2
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -c|--console-name)
+    LBC_SET_CONSOLE_NAME=1
+    shift
+    ;;
+    -r|--repo) # repository path
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_CODE_REPO=$2
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -b|--base-path) # repo base path
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_BASE_REPO_PATH=$2
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -v|--volume) # volume mount RW
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_MOUNTS_RW="${LBC_MOUNTS_RW} $2"
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -p|--port) # port mappings
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_PORT_MAPPINGS="${LBC_PORT_MAPPINGS} $2"
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -e|--env) # environment
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        LBC_ENV="${LBC_ENV} $2"
+        shift 2
+    else
+        echo "Error: Argument for $1 is missing" >&2
+        _usage
+        exit 1
+    fi
+    ;;
+    -*|--*=) # unsupported flags
+    echo "Error: Unsupported flag $1" >&2
+    _usage
+    exit 1
+    ;;
+    *) # preserve positional arguments
+    PARAMS="$PARAMS $1"
+    shift
+    ;;
+esac
+done
+# set positional arguments in their proper place
+eval set -- "$PARAMS"
+
+
+# check for prerequisites
+declare -a prerequisites=("docker" "az")
+
+for prereq in "${prerequisites[@]}"
+do
+  [[ "$(command -v ${prereq})" ]] || error "Required prequisite '${prereq}' is not installed."
+done
+
+# Setup default values.  These can be set as environment in the host.  Some can be overridden with command line parameters.
+
+LBC_IMAGE_TAG=${LBC_IMAGE_TAG:-latest}                                                                          # Build image tag
+LBC_BUILD_IMAGE=${LBC_BUILD_IMAGE:-cdpxlinux.azurecr.io/user/cogsvcs/vision-build-aspnet-3.1:${LBC_IMAGE_TAG}}  # Build image name
+LBC_PULL_IMAGE=${LBC_PULL_IMAGE:-}                                                                              # Pull latest image
+LBC_CODE_REPO=${LBC_CODE_REPO:-$(cd ${DIR}/../.. && pwd)}                                                       # Location of source code to mount
+LBC_CONTAINER_NAME=${LBC_CONTAINER_NAME:-$(basename ${LBC_CODE_REPO})}                                          # Container name
+LBC_HOST_NAME=${LBC_CONTAINER_NAME:-lbc-${HOSTNAME}}                                                            # Host name
+LBC_MOUNTS_RO=${LBC_MOUNTS_RO:-}                                                                                # Space separated list of read only volume mounts
+LBC_MOUNTS_RW=${LBC_MOUNTS_RW:-}                                                                                # Space separated list of read/write volume mounts
+LBC_PORT_MAPPINGS=${LBC_PORT_MAPPINGS:-}                                                                        # Space separated list of port mappings
+LBC_HOST_ENV=${LBC_HOST_ENV:-}                                                                                  # Space separated list of host environment variables to forward
+LBC_ENV=${LBC_ENV:-}                                                                                            # Space separated list of NAME=VALUE pairs to set in the environment
+LBC_AZURE_CONFIG=${LBC_AZURE_CONFIG:-${HOME}/.azure}                                                            # Location of Azure config.  Mapped in as a volume
+LBC_HOST_OS=$(echo $(uname) | tr '[:upper:]' '[:lower:]')                                                       # Host OS
+LBC_USE_POWERLINE=${LBC_USE_POWERLINE:-}
+LBC_DETACHED=${LBC_DETACHED:-}
+
+[[ $(docker images ${LBC_BUILD_IMAGE} --format "{{.ID}}") ]] || LBC_PULL_IMAGE=true
+
+# log in to Azure and get the latest image
+[[ ${LBC_PULL_IMAGE:-} ]] && { 
+  [[ $(az acr login --name cdpxlinux --subscription fb0fee9c-b18a-4d61-887c-eb59b04a2b02) ]] || error "Please log in to Azure and try again." && {
+    info "Pulling latest ${LBC_BUILD_IMAGE}"
+    docker pull ${LBC_BUILD_IMAGE}
+  }
+}
+
+[[ $(tty -s) ]] && run_flags="-itd" || run_flags="-id"
+
+# Start building the docker command...
+docker_run="docker run --cap-add SYS_PTRACE --security-opt seccomp=unconfined ${run_flags} --name ${LBC_CONTAINER_NAME}"
+
+[[ ${LBC_HOST_OS} == 'darwin' ]] && {
+  # We are on a MacOS machine and thus running within the container as
+  # root since Docker on MacOS runs within the user account and to get
+  # the user account access, we have to be root within the container
+  # Files will still be owned by the user due to the way that Docker
+  # on MacOS uses a special osxfs filesystem to map things.
+  docker_run="${docker_run} -u 0:0"
+
+  # The in-container home directory is always /root
+  container_user_home=/root
+} || {
+  # The /etc/passwd and /etc/group files are needed such that the user ID and
+  # gid that we are going to use are valid, but only if we have our user ID
+  # within the password file
+  LBC_MOUNTS_RO="/etc/passwd /etc/group ${LBC_MOUNTS_RO}"
+
+  # Map in the user uid and gid for execution
+  uid=$(id -u ${USER})
+  gid=$(id -g ${USER})
+  docker_run="${docker_run} -u ${uid}:${gid}"
+
+  # Add the user's additional groups such that we can run docker
+  # commands within the container as a development container and have
+  # the access to the group ownership of other files the user may have
+  for gid in $(id -G); do
+    docker_run="${docker_run} --group-add ${gid}"
+  done
+
+  # The in-container home directory matches the external home directory
+  container_user_home=${HOME}
+
+  # Home
+  # Don't clobber .bashrc from the host
+  bashrc_tmp=/tmp/.bashrc.${RANDOM}
+  touch ${bashrc_tmp}
+
+  [[ -f ${HOME}/.bashrc ]] && cat ${HOME}/.bashrc > ${bashrc_tmp}
+
+  # set up powerline
+  [[ ${LBC_USE_POWERLINE} ]] && {
+    cat >>${bashrc_tmp} <<'EOL'
+
+function _update_ps1() {
+  PS1="$(powerline-go -shell bash -modules 'kube,venv,host,ssh,cwd,perms,git,hg,exit,root' -colorize-hostname $?)"
+}
+
+[[ "$(command -v powerline-go)" ]] && [[ ${LBC_USE_POWERLINE} ]] && [[ "${TERM}" != "linux" ]] && PROMPT_COMMAND="_update_ps1; ${PROMPT_COMMAND}"
+EOL
+  }
+
+  LBC_MOUNTS_RW="${HOME}:${container_user_home} ${LBC_MOUNTS_RW}"
+  LBC_MOUNTS_RW="${bashrc_tmp}:${HOME}/.bashrc ${LBC_MOUNTS_RW}"
+
+  # Don't mount the bash profile
+  LBC_MOUNTS_RW="/dev/null:${HOME}/.profile ${LBC_MOUNTS_RW}"
+
+  LBC_HOST_ENV="USER HOME ${LBC_HOST_ENV}"
+
+  docker_run="${docker_run} --add-host=host.docker.internal:host-gateway"
+}
+
+# If the host has Docker mount it (it should as it's a prereq)
+[[ -a /var/run/docker.sock ]] && {
+  LBC_MOUNTS_RW="/var/run/docker.sock ${LBC_MOUNTS_RW}"
+  LBC_MOUNTS_RO="${LBC_MOUNTS_RO} $(which docker)"
+
+  docker_cli=$(which com.docker.cli)
+
+  [[ -f ${docker_cli} ]] && LBC_MOUNTS_RW="${docker_cli} ${LBC_MOUNTS_RW}"
+}
+
+# Azure
+LBC_MOUNTS_RW="${LBC_AZURE_CONFIG}:${container_user_home}/.azure ${LBC_MOUNTS_RW}"
+
+# Kubectl
+LBC_MOUNTS_RW="${HOME}/.kube:${container_user_home}/.kube ${LBC_MOUNTS_RW}"
+
+# Repo
+# Mount the repo at the root
+[[ ${LBC_BASE_REPO_PATH} ]] && work_dir=${LBC_BASE_REPO_PATH}/$(basename ${LBC_CODE_REPO}) || work_dir=/$(basename ${LBC_CODE_REPO})
+
+LBC_MOUNTS_RW="${LBC_MOUNTS_RW} ${LBC_CODE_REPO}:${work_dir}"
+docker_run="${docker_run} -w ${work_dir}"
+LBC_ENV="${LBC_ENV} LBC_REPO_ROOT=${work_dir}"
+
+# set up networking
+[[ ${LBC_HOST_OS} == 'darwin' ]] && {
+  docker_network=bridge
+  host_ip=$(docker network inspect bridge --format='{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+} || {
+  docker_network=bridge
+  host_ip=127.0.0.1
+}
+
+docker_run="${docker_run} --network ${docker_network} --add-host=realtimevision.kind:${host_ip}"
+
+# set up environment
+LBC_ENV="${LBC_ENV} BUILD_CONTAINER=TRUE LOCAL_BUILD=TRUE HOST_HOME=${HOME} LBC_HOST_OS=${LBC_HOST_OS} HOST_REPO_ROOT=${LBC_CODE_REPO}"
+
+[[ ${LBC_USE_POWERLINE} ]] && LBC_ENV="${LBC_ENV} LBC_USE_POWERLINE=TRUE"
+
+# Set up KUBECONFIG
+[[ -z ${KUBECONFIG:-} ]] && {
+  LBC_ENV="${LBC_ENV} KUBECONFIG=${container_user_home}/.kube/vision-local"
+} || {
+  LBC_ENV="${LBC_ENV} KUBECONFIG=${container_user_home}/.kube/$(basename ${KUBECONFIG})"
+}
+
+# Add host environment variables
+for var in ${LBC_HOST_ENV} \
+        ; do
+    # Only the ones with values and only once for each one
+    [[ -z ${!var} ]] || [[ ${docker_run} == *-e\ ${var}=* ]] || docker_run="${docker_run} -e ${var}=${!var}"
+done
+
+# Add user provided environment variables
+for var in ${LBC_ENV};
+do
+  docker_run="${docker_run} -e ${var}"
+done
+
+# Pick a host name based on our host name or given by the user
+docker_run="${docker_run} -h ${LBC_HOST_NAME}"
+
+# This function takes the name of the environment variable that
+# will have the mounts and mounts them.  If the environment variable
+# *name* ends in _RW, they are mounted read-write
+function _map_mounts()
+{
+    name=${1}
+    ro=":ro"
+    [[ ${name} == *_RW ]] && ro=""
+
+    # Map these items
+    # The user's home directory is useful for the user to do work that persists.
+    # The docker socket allows docker to be used within the container.
+    for mapping in ${!name}; do
+        mapping_from=${mapping}
+        mapping_to=${mapping}
+        if [[ ${mapping} == *:* ]]; then
+            mapping_from=${mapping%%:*}
+            mapping_to=${mapping#*:}
+        fi
+        if [[ ${mapping_to} == *:* ]] || [[ ${mapping_to} != /* ]] || [[ ${mapping_from} != /* ]]; then
+            echo 1>&2 "ERROR: ${name} entry '${mapping}' is invalid"
+            exit 1
+        fi
+        if [[ -a ${mapping_from} ]]; then
+            docker_run="${docker_run} -v ${mapping_from}:${mapping_to}${ro}"
+        else
+            echo 1>&2 "WARNING: skipping mount of non-existing '${mapping_from}'"
+        fi
+    done
+}
+
+# Map these items read-write
+_map_mounts LBC_MOUNTS_RW
+
+# Map these items read-only
+_map_mounts LBC_MOUNTS_RO
+
+# map ports from container to host
+function _map_ports()
+{
+    ports=${1}
+
+    for mapping in ${!ports}; do
+        mapping_host=${mapping}
+        mapping_container=${mapping}
+        if [[ ${mapping} == *:* ]]; then
+            mapping_host=${mapping%%:*}
+            mapping_container=${mapping#*:}
+        fi
+        docker_run="${docker_run} -p ${mapping_host}:${mapping_container}"
+    done
+}
+
+# Only map ports when using bridge networking
+[[ ${docker_network} == bridge ]] && _map_ports LBC_PORT_MAPPINGS
+
+# Remove the container if it exists
+[[ -z $(docker ps -a -q -f name=${LBC_CONTAINER_NAME}) ]] || docker rm -f ${LBC_CONTAINER_NAME} > /dev/null
+
+echo ${docker_run} ${LBC_BUILD_IMAGE} /bin/bash
+
+# Start the container detached
+${docker_run} ${LBC_BUILD_IMAGE} /bin/bash
+
+[[ ${LBC_SET_CONSOLE_NAME} ]] && echo -ne "\033]0;${LBC_HOST_NAME}\007"
+
+# Exec
+[[ ${LBC_DETACHED} ]] || docker exec -it ${LBC_CONTAINER_NAME} /bin/bash
