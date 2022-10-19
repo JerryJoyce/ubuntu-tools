@@ -118,6 +118,26 @@ HELP
   } || echo "${environment_name}=${!environment_name}"
 }
 
+function get_msazure_pat {
+  [[ ${MSAZURE_PAT} ]] && {
+    echo ${MSAZURE_PAT}
+    return 0
+  } || {
+    azure_pat=$(get_azure_secret -s 6f05198f-0aa6-4d43-8831-799e56b52e60 -v jerryjo-vault -n jerryjo-mbp20)
+    update_exports MSAZURE_PAT ${azure_pat}
+  }
+}
+
+function get_github_pat {
+  [[ ${GITHUB_PAT} ]] && {
+    echo ${GITHUB_PAT}
+    return 0
+  } || {
+    github_pat=$(get_azure_secret -s 6f05198f-0aa6-4d43-8831-799e56b52e60 -v jerryjo-vault -n github_pat)
+    update_exports GITHUB_PAT ${github_pat}
+  }
+}
+
 # kubectl helpers
 function kube_config {
     [[ -f $1 ]] && {
@@ -139,5 +159,26 @@ function kube {
 }
 
 function uvs-svc-build {
-    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
+    launch_build_container --console-name --env API_KEY=${API_KEY} --image perceptionengine.azurecr.io/rtvdev/amd64/ubuntu-1804/cluster-infra --repo ~/repos/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
+}
+
+function uvs-pda-build {
+    # launch_build_container --image cdpxlinux.azurecr.io/user/cogsvcs/vision-build-aspnet-3.1 --repo ~/repos/uvs/API-UnifiedVision-PDA --name uvs-pda "$@"
+    launch_build_container --console-name --env CDP_DEFAULT_CLIENT_PACKAGE_PAT=${MSAZURE_PAT} --image cdpxlinux.azurecr.io/user/cogsvcs/vision-build-aspnet-3.1 --repo ~/repos/API-UnifiedVision-PDA --name uvs-pda "$@"
+}
+
+function cluster-infra-build {
+    launch_build_container --console-name --env API_KEY=${API_KEY} --env CDP_DEFAULT_CLIENT_PACKAGE_PAT=${MSAZURE_PAT} --image perceptionengine.azurecr.io/rtvdev/amd64/ubuntu-1804/cluster-infra --repo ~/repos/RaaS.PerceptionEngine.ClusterInfra --name cluster-infra "$@"
+}
+
+function rtv-core-build {
+    launch_build_container --console-name --env API_KEY=${API_KEY} --env CFS_PAT=${MSAZURE_PAT} --base-path /go/src --image perceptionengine.azurecr.io/rtvdev/amd64/ubuntu-1804/perception-engine-build:latest --repo ~/repos/RaaS.PerceptionEngine.Core --name rtvcore --root "$@"
+}
+
+function rtv-shared-build {
+    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/RaaS.Shared.Utilities --name rtv-shared -p 5000 "$@"
+}
+
+function vs-build {
+    launch_build_container --console-name --env SKIP_PREFLIGHT_CHECK=true --env API_KEY=${API_KEY} --env CDP_DEFAULT_CLIENT_PACKAGE_PAT=${MSAZURE_PAT} --image perceptionengine.azurecr.io/rtvdev/amd64/ubuntu-1804/cluster-infra --repo ~/repos/UnifiedVisionPortal --name vision-studio -p 44302 "$@"
 }

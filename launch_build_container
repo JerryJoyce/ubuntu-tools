@@ -24,7 +24,6 @@ Options:
   -p/--port          A port to be mapped in the container. Repeatable.
   -e/--env           An environment variable of the form NAME=VALUE. Repeatable.
 
-
 Environment:
 
   LBC_IMAGE_TAG       : The image tag. Defaults to 'latest'
@@ -102,6 +101,10 @@ case "$1" in
     ;;
     -c|--console-name)
     LBC_SET_CONSOLE_NAME=1
+    shift
+    ;;
+    --root)
+    LBC_RUNAS_ROOT=true
     shift
     ;;
     -r|--repo) # repository path
@@ -194,6 +197,7 @@ LBC_AZURE_CONFIG=${LBC_AZURE_CONFIG:-${HOME}/.azure}                            
 LBC_HOST_OS=$(echo $(uname) | tr '[:upper:]' '[:lower:]')                                                       # Host OS
 LBC_USE_POWERLINE=${LBC_USE_POWERLINE:-}
 LBC_DETACHED=${LBC_DETACHED:-}
+LBC_RUNAS_ROOT=${LBC_RUNAS_ROOT:-false}
 
 [[ $(docker images ${LBC_BUILD_IMAGE} --format "{{.ID}}") ]] || LBC_PULL_IMAGE=true
 
@@ -210,7 +214,17 @@ LBC_DETACHED=${LBC_DETACHED:-}
 # Start building the docker command...
 docker_run="docker run --cap-add SYS_PTRACE --security-opt seccomp=unconfined ${run_flags} --name ${LBC_CONTAINER_NAME}"
 
-[[ ${LBC_HOST_OS} == 'darwin' ]] && {
+# Repo
+# Mount the repo at the root
+[[ ${LBC_BASE_REPO_PATH} ]] && work_dir=${LBC_BASE_REPO_PATH}/$(basename ${LBC_CODE_REPO}) || work_dir=/$(basename ${LBC_CODE_REPO})
+
+LBC_MOUNTS_RW="${LBC_MOUNTS_RW} ${LBC_CODE_REPO}:${work_dir}"
+docker_run="${docker_run} -w ${work_dir}"
+LBC_ENV="${LBC_ENV} LBC_REPO_ROOT=${work_dir}"
+
+[[ ${LBC_HOST_OS} == 'darwin' ]] && LBC_RUNAS_ROOT=true
+
+[[ ${LBC_RUNAS_ROOT} == 'true' ]] && {
   # We are on a MacOS machine and thus running within the container as
   # root since Docker on MacOS runs within the user account and to get
   # the user account access, we have to be root within the container
@@ -220,6 +234,30 @@ docker_run="docker run --cap-add SYS_PTRACE --security-opt seccomp=unconfined ${
 
   # The in-container home directory is always /root
   container_user_home=/root
+
+
+  # Don't clobber .bashrc from the host
+  bashrc_tmp=/var/tmp/.bashrc.${RANDOM}
+  touch ${bashrc_tmp}
+
+  [[ -f ${HOME}/.bashrc ]] && cat ${HOME}/.bashrc > ${bashrc_tmp}
+
+  echo "git config --global --add safe.directory ${work_dir}" >> ${bashrc_tmp}
+
+  # set up powerline
+  [[ ${LBC_USE_POWERLINE} ]] && {
+    cat >>${bashrc_tmp} <<'EOL'
+
+function _update_ps1() {
+  PS1="$(powerline-go -shell bash -modules 'kube,venv,host,ssh,cwd,perms,git,hg,exit,root' -colorize-hostname $?)"
+}
+
+[[ "$(command -v powerline-go)" ]] && [[ ${LBC_USE_POWERLINE} ]] && [[ "${TERM}" != "linux" ]] && PROMPT_COMMAND="_update_ps1; ${PROMPT_COMMAND}"
+EOL
+  }
+
+  LBC_MOUNTS_RW="${bashrc_tmp}:${container_user_home}/.bashrc ${LBC_MOUNTS_RW}"
+
 } || {
   # The /etc/passwd and /etc/group files are needed such that the user ID and
   # gid that we are going to use are valid, but only if we have our user ID
@@ -243,7 +281,7 @@ docker_run="docker run --cap-add SYS_PTRACE --security-opt seccomp=unconfined ${
 
   # Home
   # Don't clobber .bashrc from the host
-  bashrc_tmp=/tmp/.bashrc.${RANDOM}
+  bashrc_tmp=/var/tmp/.bashrc.${RANDOM}
   touch ${bashrc_tmp}
 
   [[ -f ${HOME}/.bashrc ]] && cat ${HOME}/.bashrc > ${bashrc_tmp}
@@ -266,10 +304,19 @@ EOL
   # Don't mount the bash profile
   LBC_MOUNTS_RW="/dev/null:${HOME}/.profile ${LBC_MOUNTS_RW}"
 
-  LBC_HOST_ENV="USER HOME ${LBC_HOST_ENV}"
+  # Don't clobber .bashrc from the host
+  gitconfig_tmp=/var/tmp/.gitconfig.${RANDOM}
+  touch ${gitconfig_tmp}
 
-  docker_run="${docker_run} --add-host=host.docker.internal:host-gateway"
+  [[ -f ${HOME}/.gitconfig ]] && {
+    cat ${HOME}/.gitconfig > ${gitconfig_tmp}
+    LBC_MOUNTS_RW="${gitconfig_tmp}:${HOME}/.gitconfig ${LBC_MOUNTS_RW}"
+  }
+
+  LBC_HOST_ENV="USER HOME ${LBC_HOST_ENV}"
 }
+
+[[ ${LBC_HOST_OS} == 'darwin' ]] || docker_run="${docker_run} --add-host=host.docker.internal:host-gateway"
 
 # If the host has Docker mount it (it should as it's a prereq)
 [[ -a /var/run/docker.sock ]] && {
@@ -287,20 +334,12 @@ LBC_MOUNTS_RW="${LBC_AZURE_CONFIG}:${container_user_home}/.azure ${LBC_MOUNTS_RW
 # Kubectl
 LBC_MOUNTS_RW="${HOME}/.kube:${container_user_home}/.kube ${LBC_MOUNTS_RW}"
 
-# Repo
-# Mount the repo at the root
-[[ ${LBC_BASE_REPO_PATH} ]] && work_dir=${LBC_BASE_REPO_PATH}/$(basename ${LBC_CODE_REPO}) || work_dir=/$(basename ${LBC_CODE_REPO})
-
-LBC_MOUNTS_RW="${LBC_MOUNTS_RW} ${LBC_CODE_REPO}:${work_dir}"
-docker_run="${docker_run} -w ${work_dir}"
-LBC_ENV="${LBC_ENV} LBC_REPO_ROOT=${work_dir}"
-
 # set up networking
 [[ ${LBC_HOST_OS} == 'darwin' ]] && {
   docker_network=bridge
   host_ip=$(docker network inspect bridge --format='{{range .IPAM.Config}}{{.Gateway}}{{end}}')
 } || {
-  docker_network=bridge
+  docker_network=host
   host_ip=127.0.0.1
 }
 
