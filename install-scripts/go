@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+
+go_version="1.24.2"
+wget -O- https://go.dev/dl/go${go_version}.linux-amd64.tar.gz | sudo tar xvz -C /usr/local
+/usr/local/go/bin/go install github.com/justjanne/powerline-go@latest
