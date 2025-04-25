@@ -1,4 +1,4 @@
-docker_dependencies="ca-certificates curl gnupg-agent software-properties-common docker.io"
+docker_dependencies="ca-certificates curl gnupg-agent software-properties-common"
 kubectl_dependencies="apt-transport-https gnupg2"
 dotnet_dependencies="wget"
 build_tools="jq git-lfs"
@@ -10,6 +10,22 @@ sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install -y --no-i
 git config --global user.email "jerryjo@microsoft.com"
 git config --global user.name "Jerry Joyce"
 
+### Docker ###
+# Add Docker's official GPG key:
+sudo apt-get update
+sudo apt-get install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
 # Docker post-install
 echo fs.inotify.max_user_instances=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
 sudo groupadd docker
@@ -19,29 +35,52 @@ sudo chown "${USER}":"${USER}" /home/"${USER}"/.docker -R
 sudo systemctl enable docker.service
 sudo systemctl enable containerd.service
 
-# azure CLI
-curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+### azure CLI ###
+sudo apt-get update
+sudo apt-get install apt-transport-https ca-certificates curl gnupg lsb-release
+sudo mkdir -p /etc/apt/keyrings
+curl -sLS https://packages.microsoft.com/keys/microsoft.asc |
+  gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+sudo chmod go+r /etc/apt/keyrings/microsoft.gpg
 
-# Go
-go_version="1.18.3"
-wget -O- https://dl.google.com/go/go${go_version}.linux-amd64.tar.gz | sudo tar xvz -C /usr/local
+AZ_DIST=$(lsb_release -cs)
+echo "Types: deb
+URIs: https://packages.microsoft.com/repos/azure-cli/
+Suites: ${AZ_DIST}
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-by: /etc/apt/keyrings/microsoft.gpg" | sudo tee /etc/apt/sources.list.d/azure-cli.sources
 
-# Powerline
+sudo apt-get update
+sudo apt-get install azure-cli
+
+### Go ###
+go_version="1.24.2"
+wget -O- https://go.dev/dl/go${go_version}.linux-amd64.tar.gz | sudo tar xvz -C /usr/local
+
+### Powerline ###
 # /usr/local/go/bin/go install github.com/justjanne/powerline-go@latest
 
-# Azure artifacts credential provider
+### Azure artifacts credential provider ###
 wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
 
-# kubectl
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - && \
-    echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee -a /etc/apt/sources.list.d/kubernetes.list && \
-    sudo apt-get update && sudo apt-get install -y --no-install-recommends kubectl
+### kubectl ###
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
 
-# helm
-curl https://baltocdn.com/helm/signing.asc | sudo apt-key add - && \
-    echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list && \
-    sudo apt-get update && sudo apt-get install -y --no-install-recommends helm
+# If the folder `/etc/apt/keyrings` does not exist, it should be created before the curl command, read the note below.
+# sudo mkdir -p -m 755 /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg # allow unprivileged APT programs to read this keyring
 
-# add helpers
-repo_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-echo "source ${repo_dir}/bash_utilities" >> ~/.profile
+# This overwrites any existing configuration in /etc/apt/sources.list.d/kubernetes.list
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo chmod 644 /etc/apt/sources.list.d/kubernetes.list   # helps tools such as command-not-found to work correctly
+sudo apt-get update
+sudo apt-get install -y kubectl
+
+### helm ###
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 get_helm.sh
+./get_helm.sh
+rm get_helm.sh
