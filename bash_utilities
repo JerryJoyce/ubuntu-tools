@@ -1,7 +1,5 @@
 
-export PATH=${PATH}:/usr/local/go/bin:~/go/bin
-export KUBE_EDITOR='open -n -W -b com.microsoft.VSCodeInsiders --args'
-export LBC_USE_POWERLINE=true
+export PATH=${PATH}:/usr/local/go/bin:~/go/bin:~/ubuntu-tools
 
 # powerline prompt
 function _update_ps1() {
@@ -118,6 +116,26 @@ HELP
   } || echo "${environment_name}=${!environment_name}"
 }
 
+function get_msazure_pat {
+  [[ ${MSAZURE_PAT} ]] && {
+    echo ${MSAZURE_PAT}
+    return 0
+  } || {
+    azure_pat=$(get_azure_secret -s 6f05198f-0aa6-4d43-8831-799e56b52e60 -v jerryjo-vault -n jerryjo-mbp20)
+    update_exports MSAZURE_PAT ${azure_pat}
+  }
+}
+
+function get_github_pat {
+  [[ ${GITHUB_PAT} ]] && {
+    echo ${GITHUB_PAT}
+    return 0
+  } || {
+    github_pat=$(get_azure_secret -s 6f05198f-0aa6-4d43-8831-799e56b52e60 -v jerryjo-vault -n github_pat)
+    update_exports GITHUB_PAT ${github_pat}
+  }
+}
+
 # kubectl helpers
 function kube_config {
     [[ -f $1 ]] && {
@@ -136,8 +154,4 @@ function kube {
     namespace=${KUBE_NAMESPACE:-default}
 
     kubectl -n ${namespace} "$@"
-}
-
-function uvs-svc-build {
-    launch_build_container --console-name --env API_KEY=${API_KEY} --image cdpxlinux.azurecr.io/user/rtvdev/cluster-infra-build --repo ~/repos/uvs/API-UnifiedVisionService --name uvs-service -p 5000 -p 5001 "$@"
 }
