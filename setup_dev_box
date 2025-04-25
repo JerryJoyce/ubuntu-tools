@@ -1,11 +1,32 @@
-docker_dependencies="ca-certificates curl gnupg-agent software-properties-common"
-kubectl_dependencies="apt-transport-https gnupg2"
-dotnet_dependencies="wget"
-build_tools="jq git-lfs"
-sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install -y --no-install-recommends \
-    ${docker_dependencies} \
-    ${kubectl_dependencies} \
-    ${build_tools}
+#!/usr/bin/bash
+
+# When provisioning a VM in Azure, be sure to set the tag AzSecPackAutoConfigReady=true. Only needs to be set on the VM resource
+
+# Steps for mounting data disk
+#
+# lsblk
+#NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+# sda       8:0    0   30G  0 disk
+# ├─sda1    8:1    0   29G  0 part /
+# ├─sda14   8:14   0    4M  0 part
+# ├─sda15   8:15   0  106M  0 part /boot/efi
+# └─sda16 259:0    0  913M  0 part /boot
+# sdb       8:16   0   64G  0 disk
+# └─sdb1    8:17   0   64G  0 part /mnt
+# sdc       8:32   0    1T  0 disk          <-- this is the data disk
+# sr0      11:0    1  628K  0 rom
+#
+# sudo mkfs -t ext4 /dev/sdc
+# mkdir -p ~/repos
+# sudo mount /dev/sdc ~/repos
+# sudo chown -R ${USER}:${USER} ~/repos
+#
+# Get the GUID of the volume
+# sudo blkid /dev/sdc
+#
+# Set the volume to auto-mount on boot
+# echo UUID=b97670b6-2d25-4816-a9de-0f5aa9917531 /home/jerryjo/repos ext4 defaults 0 2 | sudo tee -a /etc/fstab
+
 
 git config --global user.email "jerryjo@microsoft.com"
 git config --global user.name "Jerry Joyce"
