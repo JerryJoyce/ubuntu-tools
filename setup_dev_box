@@ -31,6 +31,9 @@
 sudo apt-get update
 sudo apt-get upgrade -y
 
+### GIT ###
+./install-scripts/git-credential-manager
+
 git config --global user.email "jerryjo@microsoft.com"
 git config --global user.name "Jerry Joyce"
 
@@ -51,3 +54,16 @@ wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
 
 ### helm ###
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+### install upgrade cronjob ###
+upgrade_job="0 0 * * 6 sudo apt-get update && sudo apt-get -y upgrade >> /var/log/apt-upgrade.log 2>&1"
+  
+# Check if the cron job already exists
+(crontab -l 2>/dev/null | grep -F "$upgrade_job") >/dev/null
+if [ $? -eq 0 ]; then
+  echo "Upgrade job already exists."
+else
+  # Add the cron job
+  (crontab -l 2>/dev/null; echo "$upgrade_job") | crontab -
+  echo "Upgrade job added successfully."
+fi
