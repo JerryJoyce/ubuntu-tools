@@ -25,15 +25,15 @@ sudo systemctl enable docker.service
 sudo systemctl enable containerd.service
 
 # Cleanup cronjob
-prune_job="0 0 * * 7 docker system prune -a -f >> /var/log/docker-prune.log 2>&1"
+# prune_job="0 0 * * 7 docker system prune -a -f >> /var/log/docker-prune.log 2>&1"
 
 # Check if the cron job already exists
-(crontab -l 2>/dev/null | grep -F "$prune_job") >/dev/null
+# (crontab -l 2>/dev/null | grep -F "$prune_job") >/dev/null
 
-if [ $? -eq 0 ]; then
-  echo "Prune job already exists."
-else
-  # Add the cron job
-  (crontab -l 2>/dev/null; echo "$prune_job") | crontab -
-  echo "Prune job added successfully."
-fi
+# if [ $? -eq 0 ]; then
+#   echo "Prune job already exists."
+# else
+#   # Add the cron job
+#   (crontab -l 2>/dev/null; echo "$prune_job") | crontab -
+#   echo "Prune job added successfully."
+# fi

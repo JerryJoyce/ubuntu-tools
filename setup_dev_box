@@ -2,7 +2,9 @@
 
 # When provisioning a VM in Azure, be sure to set the tag AzSecPackAutoConfigReady=true. Only needs to be set on the VM resource
 
+############################################################
 # Steps for mounting data disk
+############################################################
 #
 # lsblk
 #NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
@@ -27,6 +29,37 @@
 # Set the volume to auto-mount on boot
 # echo UUID=b97670b6-2d25-4816-a9de-0f5aa9917531 /home/jerryjo/repos ext4 defaults 0 2 | sudo tee -a /etc/fstab
 
+############################################################
+# Steps for ssh setup
+############################################################
+#
+# on the server
+#
+# sudo apt-get install -y openssh-server
+# sudo systemctl enable ssh
+# sudo systemctl start ssh
+# sudo systemctl status ssh
+#
+# on the client
+#
+# ssh-keygen -t rsa <name>
+# ssh-copy-id -i ~/.ssh/<name>.pub <user>@<host>
+# ssh-add ~/.ssh/<name>
+#
+
+############################################################
+# Configure docker context on the client after ssh setup
+############################################################
+#
+# docker context create jerry-bee9 --docker "host=ssh://jerry-bee9"
+
+############################################################
+# Configure sudo for no password
+############################################################
+
+echo -e "\n${USER} ALL=(ALL) NOPASSWD: ALL\n" | sudo tee /etc/sudoers.d/${USER}-sudo
+
+
 ### Upgrade first ###
 sudo apt-get update
 sudo apt-get upgrade -y
@@ -34,20 +67,20 @@ sudo apt-get upgrade -y
 ### GIT ###
 ./install-scripts/git-credential-manager
 
-git config --global user.email "jerryjo@microsoft.com"
+git config --global user.email "j.p.joyce@outlook.com"
 git config --global user.name "Jerry Joyce"
 
 ### Docker ###
 ./install-scripts/docker
 
 ### azure CLI ###
-./install-scripts/azure-cli
+# ./install-scripts/azure-cli
 
 ### Go ###
 ./install-scripts/go
 
 ### Azure artifacts credential provider ###
-wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
+# wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
 
 ### kubectl ###
 ./install-scripts/kubectl
@@ -56,14 +89,14 @@ wget -qO- https://aka.ms/install-artifacts-credprovider.sh | bash
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 ### install upgrade cronjob ###
-upgrade_job="0 0 * * 6 sudo apt-get update && sudo apt-get -y upgrade >> /var/log/apt-upgrade.log 2>&1"
+# upgrade_job="0 0 * * 6 sudo apt-get update && sudo apt-get -y upgrade >> /var/log/apt-upgrade.log 2>&1"
   
 # Check if the cron job already exists
-(crontab -l 2>/dev/null | grep -F "$upgrade_job") >/dev/null
-if [ $? -eq 0 ]; then
-  echo "Upgrade job already exists."
-else
-  # Add the cron job
-  (crontab -l 2>/dev/null; echo "$upgrade_job") | crontab -
-  echo "Upgrade job added successfully."
-fi
+# (crontab -l 2>/dev/null | grep -F "$upgrade_job") >/dev/null
+# if [ $? -eq 0 ]; then
+#   echo "Upgrade job already exists."
+# else
+#   # Add the cron job
+#   (crontab -l 2>/dev/null; echo "$upgrade_job") | crontab -
+#   echo "Upgrade job added successfully."
+# fi
